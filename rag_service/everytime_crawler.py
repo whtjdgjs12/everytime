@@ -47,6 +47,12 @@ TARGET_COURSES = [
     "블록체인개론",
 ]
 
+# 검색 결과에서 이 키워드가 강의명/표식에 있으면 제외 (외국인반/공학인증/영어강의)
+EXCLUDE_KEYWORDS = [
+    "외국인", "외국인반", "공학인증", "영어강의", "영어강좌",
+    "(영어)", "[영어]", "English",
+]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 셀렉터: 에타 DOM 변경/학교별 차이로 안 맞을 수 있다. debug/ 덤프를 보고 수정하라.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -178,6 +184,40 @@ def extract_rating(item) -> int:
     return 0
 
 
+def is_excluded(text: str) -> bool:
+    """외국인반/공학인증/영어강의 등 제외 대상인지."""
+    t = str(text)
+    return any(k in t for k in EXCLUDE_KEYWORDS)
+
+
+def load_all_reviews(page, delay: float, max_rounds: int = 40) -> int:
+    """에타 강의평은 무한 스크롤로 lazy-load 된다. 더 안 늘 때까지 스크롤/더보기로 전부 로드."""
+    sel = SELECTORS["review_item"]
+    prev = -1
+    for _ in range(max_rounds):
+        loc = _first_present(page, sel)
+        cnt = loc.count() if loc else 0
+        if cnt == prev:
+            more = _first_present(page, SELECTORS["more_button"])  # 더보기 버튼 있으면 클릭
+            if more:
+                try:
+                    more.first.click()
+                    page.wait_for_timeout(int(delay * 1000))
+                    continue
+                except Exception:
+                    pass
+            break
+        prev = cnt
+        try:
+            if loc and cnt > 0:
+                loc.nth(cnt - 1).scroll_into_view_if_needed(timeout=3000)
+        except Exception:
+            pass
+        page.mouse.wheel(0, 5000)
+        page.wait_for_timeout(int(delay * 800))
+    return max(prev, 0)
+
+
 def extract_reviews_from_page(page, course: str, professor: str, school: str) -> list[dict]:
     """현재 강의 상세 페이지에서 강의평 목록을 추출. (오프라인 테스트 대상 함수)"""
     items = wait_present(page, SELECTORS["review_item"], timeout=8000)
@@ -244,6 +284,14 @@ def search_and_collect(page, course: str, school: str, delay: float) -> list[dic
             pass
         if not course_matches(course, name):
             continue
+        # 외국인반/공학인증/영어강의 제외 (강의명+표식 전체 텍스트로 판정)
+        try:
+            item_text = item.inner_text()
+        except Exception:
+            item_text = name
+        if is_excluded(item_text):
+            log(f"  제외(외국인반/공학인증/영어강의): {name.strip()[:24]}")
+            continue
         prof_loc = _first_present(item, SELECTORS["result_prof"])
         professor = ""
         try:
@@ -257,8 +305,9 @@ def search_and_collect(page, course: str, school: str, delay: float) -> list[dic
             log(f"  강의 클릭 실패: {e}")
             capture(page, f"click_fail_{course}_{i}")
             continue
+        loaded = load_all_reviews(page, delay)   # 무한스크롤 전부 로드
         rows = extract_reviews_from_page(page, course, professor, school)
-        log(f"  '{name.strip()[:20]}' ({professor}) → 리뷰 {len(rows)}건")
+        log(f"  '{name.strip()[:20]}' ({professor}) → 로드 {loaded} / 수집 {len(rows)}건")
         collected.extend(rows)
         page.go_back(wait_until="domcontentloaded")
         page.wait_for_timeout(int(delay * 1000))

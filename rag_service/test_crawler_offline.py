@@ -56,6 +56,10 @@ def test_pure_parsers():
     check("공백 정제", clean_review_text("  여러   줄\n공백 ") == "여러 줄 공백")
     check("과목명 공백무시 매칭", course_matches("확률과 통계", "확률과통계"))
     check("다른 과목 불일치", not course_matches("블록체인개론", "운영체제"))
+    check("외국인반 제외", ec.is_excluded("확률과 통계 (외국인반)"))
+    check("공학인증 제외", ec.is_excluded("모바일프로그래밍 공학인증"))
+    check("영어강의 제외", ec.is_excluded("빅데이터분석개론 영어강의"))
+    check("일반강의 통과", not ec.is_excluded("블록체인개론 김교수"))
 
 
 def test_extract_from_dom():
