@@ -61,6 +61,37 @@ python rag_vectordb.py            # 대화형
 
 > 팀원은 저장소를 clone 한 뒤 **1)→2)** 만 실행하면 `store/`(벡터DB)가 생성되어 바로 사용 가능합니다. (`store/`는 용량이 커서 git에 포함하지 않고 재생성합니다.)
 
+## 우리학교 실제 데이터 직접 수집 — 크롤러 (`everytime_crawler.py`)
+
+지정한 5과목(확률과 통계·모바일프로그래밍·빅데이터분석개론·스마트기기시스템·블록체인개론)의
+강의평을 에타에서 수집해 `reviews_real.csv` 로 저장한다. 이후 `ingest.py` 부터 동일.
+
+> ⚠️ **경고:** 에브리타임 약관은 자동 수집을 금지하며, 적발 시 **계정 영구 정지/IP 차단** 위험이
+> 있다(기획서 4.2도 경고). 실행 책임은 전적으로 실행자 본인에게 있다. 계정은 코드에 넣지 말고
+> 환경변수로 전달하며, 요청 간 지연(`--delay`)을 충분히 둔다.
+
+```powershell
+# 1) 계정을 환경변수로 (코드/깃에 저장 금지)
+$env:EVERYTIME_ID="아이디"; $env:EVERYTIME_PW="비밀번호"
+
+# 2) 크롤 (기본 headed — 캡차/2단계 인증 직접 처리)
+python everytime_crawler.py                       # 5과목
+python everytime_crawler.py --courses "블록체인개론" --delay 3
+
+# 3) 이후 파이프라인 동일
+python ingest.py
+python rag_vectordb.py "블록체인개론 꿀강 추천" -c 블록체인개론
+```
+
+**셀렉터를 못 찾으면?** → `debug/` 에 **스크린샷(.png)+DOM 덤프(.html)** 가 자동 저장된다.
+그 파일로 실제 구조를 보고 `everytime_crawler.py` 상단 `SELECTORS` 를 수정하면 된다.
+(에타 DOM 은 학교/시점에 따라 다르므로 셀렉터 조정이 필요할 수 있다.)
+
+**오프라인 검증:** `python test_crawler_offline.py` — 접속 없이 파싱·평점추출·CSV연동·캡처폴백을
+픽스처로 검증(18개 통과). 실제 로그인 크롤은 본인이 실행한다.
+
+관련 파일: `everytime_crawler.py`(크롤러), `ev_parse.py`(파싱 헬퍼), `test_crawler_offline.py`(테스트).
+
 ## 임베딩 백엔드 (2종, 키 유무로 자동 전환)
 
 | 백엔드 | 설명 | 조건 |

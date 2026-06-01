@@ -16,6 +16,9 @@ venv/
 # 벡터 저장소 빌드 산출물 (build_dataset.py + ingest.py 로 재생성 가능, 용량 큼)
 rag_service/store/
 
+# 크롤러 디버그 캡처/덤프 (스크린샷·DOM)
+rag_service/debug/
+
 # OS / editor
 Thumbs.db
 .vscode/
