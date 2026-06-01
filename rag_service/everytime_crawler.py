@@ -111,14 +111,25 @@ def _first_present(page_or_loc, selector: str):
     return None
 
 
+def wait_present(page, selector: str, timeout: int = 12000):
+    """에타는 Vue SPA라 요소가 비동기 렌더된다. 셀렉터가 나타날 때까지 대기 후 locator 반환.
+    (콤마 구분 셀렉터는 wait_for_selector 가 네이티브로 'OR' 처리한다.) 실패 시 None."""
+    try:
+        page.wait_for_selector(selector, timeout=timeout, state="attached")
+        return _first_present(page, selector)
+    except Exception:
+        return None
+
+
 def login(page, ev_id: str, ev_pw: str) -> bool:
-    log("로그인 페이지 이동")
+    log("로그인 페이지 이동 (SPA 렌더 대기)")
     page.goto(LOGIN_URL, wait_until="domcontentloaded")
-    idl = _first_present(page, SELECTORS["login_id"])
+    # 에타 로그인은 account.everytime.kr 로 리다이렉트되며 Vue 로 폼이 비동기 렌더된다.
+    idl = wait_present(page, SELECTORS["login_id"], timeout=15000)
     pwl = _first_present(page, SELECTORS["login_pw"])
     if not idl or not pwl:
         capture(page, "login_form_not_found")
-        log("로그인 폼을 찾지 못함 → debug 캡처 참고")
+        log("로그인 폼을 찾지 못함 → debug 캡처 참고 (렌더 지연/구조변경 가능)")
         return False
     idl.first.fill(ev_id)
     pwl.first.fill(ev_pw)
@@ -127,12 +138,17 @@ def login(page, ev_id: str, ev_pw: str) -> bool:
         sub.first.click()
     else:
         pwl.first.press("Enter")
-    page.wait_for_timeout(3000)
-    if _first_present(page, SELECTORS["login_done"]):
-        log("로그인 성공 추정")
+    # 제출 후 로그인 페이지를 벗어나거나 성공 표식이 뜰 때까지 대기
+    try:
+        page.wait_for_url(lambda u: "/login" not in u, timeout=12000)
+    except Exception:
+        pass
+    page.wait_for_timeout(2500)
+    if "/login" not in page.url or _first_present(page, SELECTORS["login_done"]):
+        log(f"로그인 성공 추정 (현재 URL: {page.url})")
         return True
     capture(page, "login_result")
-    log("로그인 성공 표식 미확인 → debug 캡처 확인(캡차/비번 오류 가능)")
+    log("로그인 성공 표식 미확인 → debug 캡처 확인 (reCAPTCHA/비번오류 가능)")
     return False
 
 
@@ -164,7 +180,7 @@ def extract_rating(item) -> int:
 
 def extract_reviews_from_page(page, course: str, professor: str, school: str) -> list[dict]:
     """현재 강의 상세 페이지에서 강의평 목록을 추출. (오프라인 테스트 대상 함수)"""
-    items = _first_present(page, SELECTORS["review_item"])
+    items = wait_present(page, SELECTORS["review_item"], timeout=8000)
     if not items:
         capture(page, f"reviews_not_found_{course}")
         return []
@@ -202,8 +218,7 @@ def extract_reviews_from_page(page, course: str, professor: str, school: str) ->
 def search_and_collect(page, course: str, school: str, delay: float) -> list[dict]:
     log(f"과목 검색: {course}")
     page.goto(LECTURE_URL, wait_until="domcontentloaded")
-    page.wait_for_timeout(int(delay * 1000))
-    box = _first_present(page, SELECTORS["search_input"])
+    box = wait_present(page, SELECTORS["search_input"], timeout=12000)
     if not box:
         capture(page, f"search_box_not_found_{course}")
         return []
@@ -211,7 +226,7 @@ def search_and_collect(page, course: str, school: str, delay: float) -> list[dic
     box.first.press("Enter")
     page.wait_for_timeout(int(delay * 1000))
 
-    results = _first_present(page, SELECTORS["result_item"])
+    results = wait_present(page, SELECTORS["result_item"], timeout=10000)
     if not results:
         capture(page, f"no_results_{course}")
         return []
