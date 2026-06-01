@@ -13,6 +13,9 @@ venv/
 .env
 *.key
 
+# 벡터 저장소 빌드 산출물 (build_dataset.py + ingest.py 로 재생성 가능, 용량 큼)
+rag_service/store/
+
 # OS / editor
 Thumbs.db
 .vscode/

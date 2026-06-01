@@ -13,10 +13,19 @@
 
 ## RAG 서비스 빠른 시작
 
+**실제 데이터(995건) 벡터DB RAG — 권장:**
 ```bash
 cd rag_service
-python test_rag.py                                   # 전 기능 자동 검증 (API 키 불필요)
-python rag_service.py "운영체제 꿀강 추천" -c 운영체제   # 단발 질의
+python build_dataset.py     # 6개 학교 CSV 통합·정제 → reviews_real.csv (995건)
+python ingest.py            # 임베딩 → 벡터DB 적재 (store/ 생성)
+python test_vectordb.py     # 검색/필터/출처/환각방지 + 실제 교수 데모
+python rag_vectordb.py "컴퓨터프로그래밍 꿀강 추천" -c 컴퓨터프로그래밍
+```
+
+모의 데이터 PoC(v1):
+```bash
+python test_rag.py
+python rag_service.py "운영체제 꿀강 추천" -c 운영체제
 ```
 
 자세한 사용법은 [`rag_service/README.md`](rag_service/README.md) 참고.
