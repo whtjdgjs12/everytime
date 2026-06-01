@@ -23,3 +23,8 @@ rag_service/debug/
 Thumbs.db
 .vscode/
 .idea/
+
+# streamlit/앱 로그·백업
+rag_service/streamlit.log
+rag_service/*.bak
+.streamlit/secrets.toml

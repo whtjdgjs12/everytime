@@ -69,6 +69,28 @@ def _load_unified() -> pd.DataFrame:
     return df
 
 
+def store_exists() -> bool:
+    return os.path.exists(os.path.join(STORE_DIR, "meta.json"))
+
+
+def build_store(backend: str = "auto") -> int:
+    """reviews_real.csv(+syllabi) → 임베딩 → 벡터 저장소. 적재 건수 반환. (앱에서도 호출)"""
+    df = _load_unified()
+    print(f"통합 문서 {len(df)}건 (리뷰+계획서)")
+    docs = [doc_text(r) for _, r in df.iterrows()]
+
+    embedder = get_embedder(backend)
+    print(f"임베딩 백엔드: {embedder.backend}")
+    embedder.fit(docs)
+    vectors = np.asarray(embedder.embed(docs), dtype=np.float32)
+    store = NumpyVectorStore(vectors, df, embedder.backend, embedder.dim)
+    store.save(STORE_DIR)
+    if isinstance(embedder, LsaEmbedder):
+        embedder.save(LSA_PATH)
+    print(f"벡터 저장소 적재 완료: {store.count()}건 -> {STORE_DIR}")
+    return store.count()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", default="auto", choices=["auto", "lsa", "gemini"])
