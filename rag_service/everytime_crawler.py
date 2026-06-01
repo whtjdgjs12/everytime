@@ -26,9 +26,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
+import re
 import sys
 import time
+from urllib.parse import quote
 
 from ev_parse import width_to_stars, text_to_stars, clean_review_text, course_matches
 
@@ -36,8 +39,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEBUG_DIR = os.path.join(HERE, "debug")
 OUT_DEFAULT = os.path.join(HERE, "reviews_real.csv")
 
+BASE = "https://everytime.kr"
 LOGIN_URL = "https://everytime.kr/login"
-LECTURE_URL = "https://everytime.kr/lecture"
+SEARCH_URL = "https://everytime.kr/lecture/search?keyword={kw}&condition=name"
 
 TARGET_COURSES = [
     "확률과 통계",
@@ -65,12 +69,11 @@ SELECTORS = {
     "login_submit": "input[type='submit'], #container form p:last-of-type input, .submit input",
     "login_done":   "#submenu, .myinfo, a[href*='logout'], .profile",  # 로그인 성공 표식
 
-    "search_input": "input[name='keyword'], input[type='search'], .search input, #container input[type='text']",
-    "result_item":  ".lecture, #result .lectures > *, .lectures > .lecture, table tbody tr",
-    "result_name":  ".name, .lecture_name, td:nth-child(6), h3, .side.head h2",
-    "result_prof":  ".professor, .prof, td:nth-child(7)",
+    # 검색 결과는 /lecture/view/<id> 로 가는 링크들이다(직접 URL 이동에 사용).
+    "result_link":  "a[href*='/lecture/view/']",
+    "review_empty": "section.empty.review, .empty.review",   # '강의평 없음' 표식
 
-    "review_item":  "article, .article",
+    "review_item":  "article, .article, .pane article",
     "review_text":  "p.text, .text, article > p:nth-of-type(3), article p:last-of-type",
     # 별점: width% 를 가진 안쪽 span 우선
     "review_star":  "p span span[style*='width'], .star .on, .rate span span, .rate .on, .star",
@@ -262,63 +265,76 @@ def extract_reviews_from_page(page, course: str, professor: str, school: str,
     return rows
 
 
+def read_lecture_meta(page) -> tuple[str, str, str]:
+    """상세 페이지의 __INITIAL_STATE__ JSON 에서 (과목명, 교수명, 학교명) 추출."""
+    try:
+        m = re.search(r'id="__INITIAL_STATE__"[^>]*>([^<]+)<', page.content())
+        if m:
+            from urllib.parse import unquote
+            data = json.loads(unquote(m.group(1)))
+            lec = data.get("lecture", {})
+            school = data.get("campusData", {}).get("communityName", "")
+            return lec.get("name", ""), lec.get("professor", ""), school
+    except Exception:
+        pass
+    return "", "", ""
+
+
+def _collect_lecture_urls(page, course: str) -> list[str]:
+    """검색 결과에서 (과목 일치 & 비제외) 강의들의 강의평 탭 URL 목록을 수집."""
+    links = wait_present(page, SELECTORS["result_link"], timeout=12000)
+    if not links:
+        capture(page, f"no_results_{course}")
+        return []
+    urls, seen = [], set()
+    for i in range(links.count()):
+        a = links.nth(i)
+        try:
+            href = a.get_attribute("href") or ""
+            txt = a.inner_text()
+        except Exception:
+            continue
+        if "/lecture/view/" not in href:
+            continue
+        if not course_matches(course, txt):
+            continue
+        if is_excluded(txt):
+            log(f"  제외(외국인반/공학인증/영어강의): {txt.strip()[:24]}")
+            continue
+        base = href.split("?")[0]
+        if base in seen:
+            continue
+        seen.add(base)
+        full = base if base.startswith("http") else BASE + base
+        urls.append(full + "?tab=article")   # 강의평 탭으로 직접 이동
+    return urls
+
+
 def search_and_collect(page, course: str, school: str, delay: float,
                        max_per_lecture: int = 10) -> list[dict]:
     log(f"과목 검색: {course}")
-    page.goto(LECTURE_URL, wait_until="domcontentloaded")
-    box = wait_present(page, SELECTORS["search_input"], timeout=12000)
-    if not box:
-        capture(page, f"search_box_not_found_{course}")
-        return []
-    box.first.fill(course)
-    box.first.press("Enter")
-    page.wait_for_timeout(int(delay * 1000))
+    # 1) 검색 페이지로 URL 직접 이동
+    page.goto(SEARCH_URL.format(kw=quote(course)), wait_until="domcontentloaded")
+    urls = _collect_lecture_urls(page, course)
+    log(f"  대상 강의 {len(urls)}개 (과목 일치·제외 후)")
 
-    results = wait_present(page, SELECTORS["result_item"], timeout=10000)
-    if not results:
-        capture(page, f"no_results_{course}")
-        return []
-
+    # 2) 각 강의의 '강의평' 탭으로 직접 이동해 수집
     collected: list[dict] = []
-    count = results.count()
-    log(f"  검색 결과 {count}건 — 일치 강의 탐색")
-    for i in range(count):
-        item = results.nth(i)
-        name_loc = _first_present(item, SELECTORS["result_name"])
-        name = ""
-        try:
-            name = name_loc.first.inner_text() if name_loc else item.inner_text()
-        except Exception:
-            pass
-        if not course_matches(course, name):
+    for url in urls:
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_timeout(int(delay * 800))
+        name, professor, school_detected = read_lecture_meta(page)
+        sch = school_detected or school
+        # 강의평 없음이면 조용히 건너뜀
+        if _first_present(page, SELECTORS["review_empty"]) or \
+                page.locator("text=아직 등록된 강의평이 없습니다").count() > 0:
+            log(f"  '{(name or course)[:20]}' ({professor}) → 강의평 0개")
             continue
-        # 외국인반/공학인증/영어강의 제외 (강의명+표식 전체 텍스트로 판정)
-        try:
-            item_text = item.inner_text()
-        except Exception:
-            item_text = name
-        if is_excluded(item_text):
-            log(f"  제외(외국인반/공학인증/영어강의): {name.strip()[:24]}")
-            continue
-        prof_loc = _first_present(item, SELECTORS["result_prof"])
-        professor = ""
-        try:
-            professor = prof_loc.first.inner_text().strip() if prof_loc else ""
-        except Exception:
-            pass
-        try:
-            item.click()
-            page.wait_for_timeout(int(delay * 1000))
-        except Exception as e:
-            log(f"  강의 클릭 실패: {e}")
-            capture(page, f"click_fail_{course}_{i}")
-            continue
-        loaded = load_all_reviews(page, delay, target=max_per_lecture)  # 필요한 만큼만 로드
-        rows = extract_reviews_from_page(page, course, professor, school, limit=max_per_lecture)
-        log(f"  '{name.strip()[:20]}' ({professor}) → 로드 {loaded} / 수집 {len(rows)}건(최대 {max_per_lecture})")
+        loaded = load_all_reviews(page, delay, target=max_per_lecture)
+        rows = extract_reviews_from_page(page, name or course, professor, sch, limit=max_per_lecture)
+        log(f"  '{(name or course)[:20]}' ({professor}) → 로드 {loaded} / 수집 {len(rows)}건(최대 {max_per_lecture})")
         collected.extend(rows)
-        page.go_back(wait_until="domcontentloaded")
-        page.wait_for_timeout(int(delay * 1000))
+        time.sleep(delay)
     return collected
 
 
