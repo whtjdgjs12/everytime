@@ -1,13 +1,19 @@
 # 에브리타임 강의평 RAG AI 서비스
 
-`project_proposal.md` 기획서를 구현한 RAG 서비스입니다. **두 가지 버전**이 있습니다.
+`project_proposal.md` 기획서를 구현한 RAG 서비스입니다.
 
-| 버전 | 데이터 | 검색 방식 | 진입점 |
-|------|--------|-----------|--------|
-| **v2 (실제 데이터·벡터DB)** ⭐ | 실제 크롤링 강의평 **995건** | **벡터 임베딩 의미검색** (벡터DB) | `rag_vectordb.py` |
-| v1 (PoC·모의 데이터) | 모의 29건(8스키마) | TF-IDF 유사도 | `rag_service.py` |
+**최종 데이터: 가천대 5과목 실제 강의평 187건** (직접 크롤링).
+대상 과목: 확률과 통계 · 모바일프로그래밍 · 빅데이터분석개론 · 스마트기기시스템 · 블록체인개론.
 
-아래는 **v2(실제 데이터 벡터DB RAG)** 기준 설명입니다.
+| 진입점 | 역할 |
+|--------|------|
+| `everytime_crawler.py` | 강의평 크롤러(Playwright) → `reviews_real.csv` |
+| `ingest.py` | 임베딩 → 벡터 저장소(`store/`) |
+| `rag_vectordb.py` | 벡터 RAG (검색·필터·출처표기·환각방지·Claude/오프라인 생성) ⭐ |
+| `app.py` | Streamlit 채팅 웹앱 |
+
+> 채팅앱: `python -m streamlit run app.py` · Claude 켜기: `ANTHROPIC_API_KEY` 설정
+> 아래는 RAG 파이프라인 상세 설명입니다.
 
 ## 파이프라인 (velog RAG 구조)
 

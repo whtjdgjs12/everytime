@@ -33,7 +33,8 @@ import sys
 import time
 from urllib.parse import quote
 
-from ev_parse import width_to_stars, text_to_stars, clean_review_text, course_matches
+from ev_parse import (width_to_stars, text_to_stars, clean_review_text,
+                      course_matches, canonical_course)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEBUG_DIR = os.path.join(HERE, "debug")
@@ -228,6 +229,7 @@ def extract_reviews_from_page(page, course: str, professor: str, school: str,
                               limit: int | None = None) -> list[dict]:
     """현재 강의 상세 페이지에서 강의평 목록을 추출. limit 지정 시 그 개수까지만.
     (오프라인 테스트 대상 함수)"""
+    course = canonical_course(course, TARGET_COURSES)   # 과목명 통일(공백차이 병합)
     items = wait_present(page, SELECTORS["review_item"], timeout=8000)
     if not items:
         capture(page, f"reviews_not_found_{course}")

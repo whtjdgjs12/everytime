@@ -44,6 +44,16 @@ def clean_review_text(text) -> str:
     return t.strip()
 
 
+def canonical_course(name, targets) -> str:
+    """공백 차이 등으로 갈라진 동일 과목명을 대표 과목명(targets 중 하나)으로 통일.
+    예: '확률과통계' → '확률과 통계'. 매칭 없으면 양끝 공백만 제거."""
+    key = re.sub(r"\s+", "", str(name))
+    for t in targets:
+        if re.sub(r"\s+", "", str(t)) == key:
+            return str(t)
+    return str(name).strip()
+
+
 def course_matches(target: str, lecture_name: str) -> bool:
     """검색 결과의 강의명이 대상 과목명과 일치하는지(공백 무시 부분일치)."""
     def norm(x):
