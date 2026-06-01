@@ -140,6 +140,37 @@ def _gemini_generate(prompt: str, api_key: str, model: str = "gemini-1.5-flash")
     return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
+DEFAULT_CLAUDE_MODEL = "claude-haiku-4-5-20251001"  # 저렴·빠름. 더 좋은 품질은 sonnet/opus
+
+
+def _claude_generate(query: str, contexts: List[Review], api_key: str,
+                     model: str = DEFAULT_CLAUDE_MODEL) -> str:
+    """Anthropic Messages API 로 답변 생성. 시스템 프롬프트에 prompt caching 적용."""
+    import requests
+
+    ctx = "\n\n".join(c.as_context() for c in contexts) if contexts else "(없음)"
+    user = f"[강의평 컨텍스트]\n{ctx}\n\n[사용자 질문]\n{query}"
+    body = {
+        "model": model,
+        "max_tokens": 1024,
+        # 매 질문마다 동일한 시스템 프롬프트 → 캐싱으로 입력 토큰 비용 절감
+        "system": [{"type": "text", "text": SYSTEM_INSTRUCTION,
+                    "cache_control": {"type": "ephemeral"}}],
+        "messages": [{"role": "user", "content": user}],
+    }
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    resp = requests.post("https://api.anthropic.com/v1/messages",
+                         headers=headers, json=body, timeout=40)
+    resp.raise_for_status()
+    data = resp.json()
+    return "".join(b.get("text", "") for b in data.get("content", [])
+                   if b.get("type") == "text").strip()
+
+
 def _offline_generate(query: str, contexts: List[Review]) -> str:
     if not contexts:
         return REFUSAL_MSG
@@ -175,9 +206,15 @@ def _offline_generate(query: str, contexts: List[Review]) -> str:
 
 
 class RagService:
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, llm: str = "auto", model: Optional[str] = None):
         self.retriever = VectorRetriever()
-        self.api_key = api_key if api_key is not None else os.environ.get("GEMINI_API_KEY")
+        self.anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+        self.gemini_key = os.environ.get("GEMINI_API_KEY")
+        self.model = model
+        # 백엔드 선택: auto → claude > gemini > offline
+        if llm == "auto":
+            llm = "claude" if self.anthropic_key else ("gemini" if self.gemini_key else "offline")
+        self.llm = llm
 
     def answer(self, query, professor=None, course=None, school=None, source=None, top_k=3) -> dict:
         # 3.4 Zero-Hallucination
@@ -189,9 +226,17 @@ class RagService:
         if not contexts:
             return {"answer": REFUSAL_MSG, "grounded": False, "sources": []}
 
-        if self.api_key:
+        if self.llm == "claude" and self.anthropic_key:
             try:
-                text = _gemini_generate(build_prompt(query, contexts), self.api_key)
+                text = _claude_generate(query, contexts, self.anthropic_key,
+                                        self.model or DEFAULT_CLAUDE_MODEL)
+                mode = f"claude ({self.model or DEFAULT_CLAUDE_MODEL})"
+            except Exception as e:
+                text = _offline_generate(query, contexts)
+                mode = f"offline (claude 실패: {type(e).__name__})"
+        elif self.llm == "gemini" and self.gemini_key:
+            try:
+                text = _gemini_generate(build_prompt(query, contexts), self.gemini_key)
                 mode = "gemini"
             except Exception as e:
                 text = _offline_generate(query, contexts)
@@ -227,10 +272,13 @@ if __name__ == "__main__":
     p.add_argument("--school", "-s", default=None)
     p.add_argument("--source", default=None, choices=["review", "syllabus"],
                    help="review 또는 syllabus 만 검색")
+    p.add_argument("--llm", default="auto", choices=["auto", "claude", "gemini", "offline"],
+                   help="답변 생성 백엔드 (기본 auto: 키 있으면 claude>gemini, 없으면 offline)")
+    p.add_argument("--model", default=None, help="Claude 모델 ID (예: claude-sonnet-4-6)")
     p.add_argument("--top_k", "-k", type=int, default=3)
     args = p.parse_args()
 
-    svc = RagService()
+    svc = RagService(llm=args.llm, model=args.model)
     if not args.query:
         print("에타 강의평 RAG (종료: 나가기)\n")
         while True:
