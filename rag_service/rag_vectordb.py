@@ -165,7 +165,9 @@ def _claude_generate(query: str, contexts: List[Review], api_key: str,
     }
     resp = requests.post("https://api.anthropic.com/v1/messages",
                          headers=headers, json=body, timeout=40)
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        # 실제 원인을 그대로 노출(인증/크레딧/모델 등)
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:300]}")
     data = resp.json()
     return "".join(b.get("text", "") for b in data.get("content", [])
                    if b.get("type") == "text").strip()
@@ -210,7 +212,7 @@ class RagService:
         self.retriever = VectorRetriever()
         self.anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
         self.gemini_key = os.environ.get("GEMINI_API_KEY")
-        self.model = model
+        self.model = model or os.environ.get("CLAUDE_MODEL")
         # 백엔드 선택: auto → claude > gemini > offline
         if llm == "auto":
             llm = "claude" if self.anthropic_key else ("gemini" if self.gemini_key else "offline")
@@ -233,7 +235,7 @@ class RagService:
                 mode = f"claude ({self.model or DEFAULT_CLAUDE_MODEL})"
             except Exception as e:
                 text = _offline_generate(query, contexts)
-                mode = f"offline (claude 실패: {type(e).__name__})"
+                mode = f"offline (claude 실패: {str(e)[:200]})"
         elif self.llm == "gemini" and self.gemini_key:
             try:
                 text = _gemini_generate(build_prompt(query, contexts), self.gemini_key)
