@@ -42,13 +42,28 @@ rows = get_rows()
 courses = sorted(rows[rows["source"] == "review"]["course"].unique()) \
     if "source" in rows.columns else sorted(rows["course"].unique())
 
+def _server_key() -> str:
+    """배포 환경(Streamlit Cloud)의 Secrets 에 등록한 서버 키. 모든 사용자에게 적용된다."""
+    try:
+        return st.secrets.get("ANTHROPIC_API_KEY", "") or ""
+    except Exception:
+        return ""
+
+
+server_key = _server_key()
+
 with st.sidebar:
     st.header("⚙️ 설정")
-    key_in = st.text_input("Claude API 키 (선택)", type="password",
-                           value=os.environ.get("ANTHROPIC_API_KEY", ""),
-                           help="console.anthropic.com 에서 발급. 넣으면 답변이 자연어 AI로 업그레이드됩니다.")
-    if key_in:
-        os.environ["ANTHROPIC_API_KEY"] = key_in
+    if server_key:
+        os.environ["ANTHROPIC_API_KEY"] = server_key
+        key_in = server_key
+        st.success("✅ Claude 서버 키 적용됨 — 모든 답변이 Claude로 생성됩니다")
+    else:
+        key_in = st.text_input("Claude API 키 (선택)", type="password",
+                               value=os.environ.get("ANTHROPIC_API_KEY", ""),
+                               help="console.anthropic.com 에서 발급. 넣으면 답변이 자연어 AI로 업그레이드됩니다.")
+        if key_in:
+            os.environ["ANTHROPIC_API_KEY"] = key_in
     course = st.selectbox("과목 필터", ["(전체)"] + list(courses))
     top_k = st.slider("참고 리뷰 수", 3, 10, 5)
     st.caption("키 없으면 오프라인 요약, 키 있으면 Claude 생성")
