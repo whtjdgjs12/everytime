@@ -28,3 +28,6 @@ Thumbs.db
 rag_service/streamlit.log
 rag_service/*.bak
 .streamlit/secrets.toml
+rag_service/streamlit*.log
+~$*.pptx
+presentation/~$*.pptx

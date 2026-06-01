@@ -43,11 +43,20 @@ courses = sorted(rows[rows["source"] == "review"]["course"].unique()) \
     if "source" in rows.columns else sorted(rows["course"].unique())
 
 def _server_key() -> str:
-    """배포 환경(Streamlit Cloud)의 Secrets 에 등록한 서버 키. 모든 사용자에게 적용된다."""
-    try:
-        return st.secrets.get("ANTHROPIC_API_KEY", "") or ""
-    except Exception:
-        return ""
+    """배포 환경(Streamlit Cloud)의 Secrets 에 등록한 서버 키. 모든 사용자에게 적용된다.
+    secrets.toml 이 없을 때 st.secrets 에 접근하면 UI 에러가 뜨므로, 파일이 있을 때만 읽는다."""
+    from pathlib import Path
+    env = os.environ.get("ANTHROPIC_API_KEY", "")
+    if env:
+        return env
+    paths = [Path.home() / ".streamlit" / "secrets.toml",
+             Path.cwd() / ".streamlit" / "secrets.toml"]
+    if any(p.exists() for p in paths):
+        try:
+            return st.secrets.get("ANTHROPIC_API_KEY", "") or ""
+        except Exception:
+            return ""
+    return ""
 
 
 server_key = _server_key()
