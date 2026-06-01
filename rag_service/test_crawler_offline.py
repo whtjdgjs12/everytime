@@ -84,6 +84,15 @@ def test_extract_from_dom():
     check("본문 정제됨", "꿀강" in rows[0]["review"])
     check("캡처 png 생성", os.path.exists(os.path.join(ec.DEBUG_DIR, "offline_test_capture.png")))
     check("DOM 덤프 html 생성", os.path.exists(os.path.join(ec.DEBUG_DIR, "offline_test_capture.html")))
+
+    # 강의당 최대 개수 제한 검증
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch(headless=True)
+        page = b.new_page(); page.set_content(FIXTURE_HTML)
+        limited = ec.extract_reviews_from_page(page, "확률과 통계", "홍길동", "우리학교", limit=1)
+        b.close()
+    check("limit=1 → 1건만 수집", len(limited) == 1, f"{len(limited)}건")
     return rows
 
 

@@ -190,13 +190,16 @@ def is_excluded(text: str) -> bool:
     return any(k in t for k in EXCLUDE_KEYWORDS)
 
 
-def load_all_reviews(page, delay: float, max_rounds: int = 40) -> int:
-    """에타 강의평은 무한 스크롤로 lazy-load 된다. 더 안 늘 때까지 스크롤/더보기로 전부 로드."""
+def load_all_reviews(page, delay: float, target: int | None = None, max_rounds: int = 40) -> int:
+    """에타 강의평은 무한 스크롤로 lazy-load 된다. 스크롤/더보기로 로드.
+    target 개수가 차면 조기 종료(불필요한 스크롤·요청 방지)."""
     sel = SELECTORS["review_item"]
     prev = -1
     for _ in range(max_rounds):
         loc = _first_present(page, sel)
         cnt = loc.count() if loc else 0
+        if target and cnt >= target:   # 필요한 만큼 모이면 그만
+            return cnt
         if cnt == prev:
             more = _first_present(page, SELECTORS["more_button"])  # 더보기 버튼 있으면 클릭
             if more:
@@ -218,8 +221,10 @@ def load_all_reviews(page, delay: float, max_rounds: int = 40) -> int:
     return max(prev, 0)
 
 
-def extract_reviews_from_page(page, course: str, professor: str, school: str) -> list[dict]:
-    """현재 강의 상세 페이지에서 강의평 목록을 추출. (오프라인 테스트 대상 함수)"""
+def extract_reviews_from_page(page, course: str, professor: str, school: str,
+                              limit: int | None = None) -> list[dict]:
+    """현재 강의 상세 페이지에서 강의평 목록을 추출. limit 지정 시 그 개수까지만.
+    (오프라인 테스트 대상 함수)"""
     items = wait_present(page, SELECTORS["review_item"], timeout=8000)
     if not items:
         capture(page, f"reviews_not_found_{course}")
@@ -252,10 +257,13 @@ def extract_reviews_from_page(page, course: str, professor: str, school: str) ->
             "review": text,
             "source": "review",
         })
+        if limit and len(rows) >= limit:   # 강의당 최대 개수 제한
+            break
     return rows
 
 
-def search_and_collect(page, course: str, school: str, delay: float) -> list[dict]:
+def search_and_collect(page, course: str, school: str, delay: float,
+                       max_per_lecture: int = 10) -> list[dict]:
     log(f"과목 검색: {course}")
     page.goto(LECTURE_URL, wait_until="domcontentloaded")
     box = wait_present(page, SELECTORS["search_input"], timeout=12000)
@@ -305,16 +313,16 @@ def search_and_collect(page, course: str, school: str, delay: float) -> list[dic
             log(f"  강의 클릭 실패: {e}")
             capture(page, f"click_fail_{course}_{i}")
             continue
-        loaded = load_all_reviews(page, delay)   # 무한스크롤 전부 로드
-        rows = extract_reviews_from_page(page, course, professor, school)
-        log(f"  '{name.strip()[:20]}' ({professor}) → 로드 {loaded} / 수집 {len(rows)}건")
+        loaded = load_all_reviews(page, delay, target=max_per_lecture)  # 필요한 만큼만 로드
+        rows = extract_reviews_from_page(page, course, professor, school, limit=max_per_lecture)
+        log(f"  '{name.strip()[:20]}' ({professor}) → 로드 {loaded} / 수집 {len(rows)}건(최대 {max_per_lecture})")
         collected.extend(rows)
         page.go_back(wait_until="domcontentloaded")
         page.wait_for_timeout(int(delay * 1000))
     return collected
 
 
-def crawl(courses, school, out_path, headless, delay) -> int:
+def crawl(courses, school, out_path, headless, delay, max_per_lecture=10) -> int:
     from playwright.sync_api import sync_playwright
 
     ev_id = os.environ.get("EVERYTIME_ID")
@@ -335,7 +343,7 @@ def crawl(courses, school, out_path, headless, delay) -> int:
             return 2
         for c in courses:
             try:
-                all_rows.extend(search_and_collect(page, c, school, delay))
+                all_rows.extend(search_and_collect(page, c, school, delay, max_per_lecture))
             except Exception as e:
                 log(f"'{c}' 처리 중 오류: {e}")
                 capture(page, f"error_{c}")
@@ -368,11 +376,14 @@ def main():
     ap.add_argument("--out", default=OUT_DEFAULT)
     ap.add_argument("--headless", action="store_true", help="브라우저 숨김(기본: 보임)")
     ap.add_argument("--delay", type=float, default=2.0, help="요청 간 지연(초)")
+    ap.add_argument("--max-per-lecture", type=int, default=10, dest="max_per_lecture",
+                    help="강의당 최대 수집 리뷰 수(기본 10)")
     args = ap.parse_args()
 
     log("대상 과목: " + ", ".join(args.courses))
     log("⚠️ 자동 수집은 에타 약관 위반·계정 정지 위험이 있으며 실행 책임은 본인에게 있습니다.")
-    rc = crawl(args.courses, args.school, args.out, args.headless, args.delay)
+    rc = crawl(args.courses, args.school, args.out, args.headless, args.delay,
+               args.max_per_lecture)
     sys.exit(rc)
 
 
