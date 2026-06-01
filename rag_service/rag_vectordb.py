@@ -41,14 +41,16 @@ class Review:
     course: str
     rating: int
     review: str
+    semester: str = ""       # 수강학기(크롤링 데이터에 존재)
     source: str = "review"  # "review" | "syllabus"
     score: float = 0.0       # 의미 유사도 (코사인)
 
     def citation(self) -> str:
-        """3.3 출처 표기. 리뷰는 평점, 강의계획서는 계획서로 구분 표기."""
+        """3.3 출처 표기. 리뷰는 (학교 과목 [학기] 평점N점 리뷰 참고), 계획서는 계획서로 표기."""
         if self.source == "syllabus":
             return f"({self.school} {self.course} 강의계획서 참고)"
-        return f"({self.school} {self.course} 평점 {self.rating}점 리뷰 참고)"
+        sem = f" {self.semester}" if self.semester else ""
+        return f"({self.school} {self.course}{sem} 평점 {self.rating}점 리뷰 참고)"
 
     def as_context(self) -> str:
         if self.source == "syllabus":
@@ -106,7 +108,8 @@ class VectorRetriever:
             Review(
                 id=h["id"], school=h["school"], professor=h["professor"],
                 course=h["course"], rating=h["rating"], review=h["review"],
-                source=h.get("source", "review"), score=h["score"],
+                semester=h.get("semester", ""), source=h.get("source", "review"),
+                score=h["score"],
             )
             for h in hits
         ]
@@ -205,7 +208,8 @@ class RagService:
             "sources": [
                 {
                     "id": c.id, "source": c.source, "school": c.school,
-                    "professor": c.professor, "course": c.course, "rating": c.rating,
+                    "professor": c.professor, "course": c.course,
+                    "semester": c.semester, "rating": c.rating,
                     "citation": c.citation(), "score": c.score,
                 }
                 for c in contexts

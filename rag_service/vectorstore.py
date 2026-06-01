@@ -81,6 +81,7 @@ class NumpyVectorStore:
                 "school": str(row["school"]),
                 "professor": str(row["professor"]),
                 "course": str(row["course"]),
+                "semester": str(row["semester"]) if "semester" in self.rows.columns and pd.notna(row["semester"]) else "",
                 "rating": int(row["rating"]),
                 "review": str(row["review"]),
                 "source": str(row["source"]) if "source" in self.rows.columns else "review",

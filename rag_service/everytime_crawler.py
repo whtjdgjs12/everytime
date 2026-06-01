@@ -50,22 +50,27 @@ TARGET_COURSES = [
 # ─────────────────────────────────────────────────────────────────────────────
 # 셀렉터: 에타 DOM 변경/학교별 차이로 안 맞을 수 있다. debug/ 덤프를 보고 수정하라.
 # ─────────────────────────────────────────────────────────────────────────────
+# 참고: shkim0116/Lecture-Recommendation-NLP 및 에타 실제 구조 기반.
+# 강의평은 <article> 태그, 별점은 내부 span 의 style width%(80%→4점), 본문은 p.text,
+# 수강학기는 article 내 p > span 에 '2024년 1학기' 형태로 들어있다.
 SELECTORS = {
-    "login_id":     "input[name='id'], input[name='userid']",
-    "login_pw":     "input[name='password']",
-    "login_submit": "input[type='submit'], button[type='submit'], .submit input",
-    "login_done":   "#submenu, .myinfo, a[href*='logout']",   # 로그인 성공 표식
+    "login_id":     "input[name='id'], #container form p:nth-of-type(1) input",
+    "login_pw":     "input[name='password'], #container form p:nth-of-type(2) input",
+    "login_submit": "input[type='submit'], #container form p:last-of-type input, .submit input",
+    "login_done":   "#submenu, .myinfo, a[href*='logout'], .profile",  # 로그인 성공 표식
 
-    "search_input": "input[name='keyword'], input[type='search'], .search input",
-    "result_item":  ".lecture, .result .lecture, #result .lectures > *",
-    "result_name":  ".name, .lecture_name, h3",
-    "result_prof":  ".professor, .prof",
+    "search_input": "input[name='keyword'], input[type='search'], .search input, #container input[type='text']",
+    "result_item":  ".lecture, #result .lectures > *, .lectures > .lecture, table tbody tr",
+    "result_name":  ".name, .lecture_name, td:nth-child(6), h3, .side.head h2",
+    "result_prof":  ".professor, .prof, td:nth-child(7)",
 
-    "review_item":  ".article, .review, .articles > *",
-    "review_text":  ".text, .article_text, p",
-    "review_star":  ".star .on, .stars .on, .rate .on, .star",   # 채워진 별/너비
-    "review_score": ".rate, .score, .star_score",                # 숫자 평점(있으면)
-    "more_button":  ".more, .button.more, a.more",               # 더보기(있으면)
+    "review_item":  "article, .article",
+    "review_text":  "p.text, .text, article > p:nth-of-type(3), article p:last-of-type",
+    # 별점: width% 를 가진 안쪽 span 우선
+    "review_star":  "p span span[style*='width'], .star .on, .rate span span, .rate .on, .star",
+    "review_score": ".rate.num, .score, .star_score",                  # 숫자 평점(있으면)
+    "review_semester": "article > p:nth-of-type(2) span, .semester span, .semester",  # 수강학기
+    "more_button":  ".more, .button.more, a.more",                     # 더보기(있으면)
 }
 
 
@@ -175,10 +180,18 @@ def extract_reviews_from_page(page, course: str, professor: str, school: str) ->
         text = clean_review_text(raw)
         if len(text) < 5:
             continue
+        sem_loc = _first_present(item, SELECTORS["review_semester"])
+        semester = ""
+        try:
+            if sem_loc:
+                semester = clean_review_text(sem_loc.first.inner_text())
+        except Exception:
+            pass
         rows.append({
             "school": school,
             "professor": professor or "미상",
             "course": course,
+            "semester": semester,
             "rating": extract_rating(item),
             "review": text,
             "source": "review",
@@ -276,7 +289,7 @@ def crawl(courses, school, out_path, headless, delay) -> int:
 
 
 def write_rows(rows: list[dict], out_path: str):
-    cols = ["id", "school", "professor", "course", "rating", "review", "source"]
+    cols = ["id", "school", "professor", "course", "semester", "rating", "review", "source"]
     with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()

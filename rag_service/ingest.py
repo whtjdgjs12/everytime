@@ -27,7 +27,7 @@ SYLLABI_PATH = os.path.join(HERE, "syllabi.csv")
 STORE_DIR = os.path.join(HERE, "store")
 LSA_PATH = os.path.join(STORE_DIR, "lsa_model.pkl")
 
-COLUMNS = ["id", "school", "professor", "course", "rating", "review", "source"]
+COLUMNS = ["id", "school", "professor", "course", "semester", "rating", "review", "source"]
 
 
 def doc_text(row) -> str:
@@ -37,24 +37,35 @@ def doc_text(row) -> str:
     return f"{row['course']} {row['professor']} 평점{row['rating']} {row['review']}"
 
 
+def _coerce(df: pd.DataFrame, default_source: str) -> pd.DataFrame:
+    """누락 컬럼을 기본값으로 채워 통합 스키마에 맞춘다(구버전 CSV 호환)."""
+    if "source" not in df.columns:
+        df["source"] = default_source
+    if "semester" not in df.columns:
+        df["semester"] = ""
+    for c in COLUMNS:
+        if c not in df.columns:
+            df[c] = ""
+    return df[COLUMNS]
+
+
 def _load_unified() -> pd.DataFrame:
     """리뷰 + (있으면) 강의계획서를 동일 스키마로 통합."""
     frames = []
-    rv = pd.read_csv(CSV_PATH)
-    if "source" not in rv.columns:
-        rv["source"] = "review"
-    frames.append(rv[COLUMNS])
+    rv = _coerce(pd.read_csv(CSV_PATH), "review")
+    frames.append(rv)
     print(f"리뷰 {len(rv)}건 로드")
 
     if os.path.exists(SYLLABI_PATH):
-        sy = pd.read_csv(SYLLABI_PATH)
-        frames.append(sy[COLUMNS])
+        sy = _coerce(pd.read_csv(SYLLABI_PATH), "syllabus")
+        frames.append(sy)
         print(f"강의계획서 청크 {len(sy)}건 로드")
     else:
         print("강의계획서 없음 (syllabi.csv) — 리뷰만 적재. 'python build_syllabi.py' 로 생성 가능")
 
     df = pd.concat(frames, ignore_index=True)
     df["id"] = df["id"].astype(str)
+    df["semester"] = df["semester"].fillna("")
     return df
 
 

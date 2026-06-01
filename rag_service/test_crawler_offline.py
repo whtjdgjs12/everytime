@@ -23,23 +23,26 @@ def check(name, cond, detail=""):
         FAIL += 1; print(f"  [FAIL] {name}  {detail}")
 
 
-# 에타 강의 상세 페이지의 강의평 영역과 '같은 구조'로 만든 픽스처
+# 에타 강의 상세 페이지의 강의평 구조(article > p[별점]/p[학기]/p[본문])와 동일한 픽스처
 FIXTURE_HTML = """
 <html><body>
-<div class="articles">
-  <div class="article">
-     <div class="star"><span class="on" style="width: 100%"></span></div>
+<div id="container"><div class="side"></div><div class="pane">
+  <article>
+     <p class="rate"><span><span style="width: 100%"></span></span></p>
+     <p class="semester"><span>2024년 1학기</span></p>
      <p class="text">교수님 설명이 깔끔하고 시험도 족보 위주라 학점 잘 나옴 꿀강 인정</p>
-  </div>
-  <div class="article">
-     <div class="star"><span class="on" style="width: 40%"></span></div>
+  </article>
+  <article>
+     <p class="rate"><span><span style="width: 40%"></span></span></p>
+     <p class="semester"><span>2023년 2학기</span></p>
      <p class="text">과제 폭탄에 팀플 헬이라 진짜 힘들었음 비추</p>
-  </div>
-  <div class="article">
-     <div class="star"><span class="on" style="width: 60%"></span></div>
+  </article>
+  <article>
+     <p class="rate"><span><span style="width: 60%"></span></span></p>
+     <p class="semester"><span>2024년 1학기</span></p>
      <p class="text">ok</p>   <!-- 5자 미만 → 제외되어야 함 -->
-  </div>
-</div>
+  </article>
+</div></div>
 </body></html>
 """
 
@@ -69,6 +72,8 @@ def test_extract_from_dom():
 
     check("리뷰 2건 추출(짧은 1건 제외)", len(rows) == 2, f"{len(rows)}건")
     check("평점 정확(5,2)", [r["rating"] for r in rows] == [5, 2], str([r["rating"] for r in rows]))
+    check("수강학기 추출", [r["semester"] for r in rows] == ["2024년 1학기", "2023년 2학기"],
+          str([r.get("semester") for r in rows]))
     check("교수/과목/소스 채움",
           rows[0]["professor"] == "홍길동" and rows[0]["course"] == "확률과 통계"
           and rows[0]["source"] == "review")
