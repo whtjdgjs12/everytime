@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Secrets / env
+.env
+*.key
+
+# OS / editor
+Thumbs.db
+.vscode/
+.idea/
