@@ -35,19 +35,27 @@ REFUSAL_MSG = "데이터가 준비되지 않아 답변드리기 어렵습니다.
 
 @dataclass
 class Review:
-    id: int
+    id: str
     school: str
     professor: str
     course: str
     rating: int
     review: str
-    score: float = 0.0  # 의미 유사도 (1 - cosine distance)
+    source: str = "review"  # "review" | "syllabus"
+    score: float = 0.0       # 의미 유사도 (코사인)
 
     def citation(self) -> str:
-        """3.3 출처 표기 — 실제 데이터에 학기가 없어 학교/과목/평점으로 표기."""
+        """3.3 출처 표기. 리뷰는 평점, 강의계획서는 계획서로 구분 표기."""
+        if self.source == "syllabus":
+            return f"({self.school} {self.course} 강의계획서 참고)"
         return f"({self.school} {self.course} 평점 {self.rating}점 리뷰 참고)"
 
     def as_context(self) -> str:
+        if self.source == "syllabus":
+            return (
+                f"[강의계획서 #{self.id}] 학교: {self.school} | 교수: {self.professor} | "
+                f"과목: {self.course}\n내용: {self.review}"
+            )
         return (
             f"[리뷰 #{self.id}] 학교: {self.school} | 교수: {self.professor} | "
             f"과목: {self.course} | 평점: {self.rating}/5\n내용: {self.review}"
@@ -69,23 +77,25 @@ class VectorRetriever:
         else:
             self.embedder = get_embedder("gemini")
 
-    # --- 3.2 부분 일치 교수/과목/학교명으로 후보 행 인덱스 제한 ---
-    def _candidate_idx(self, professor, course, school):
+    # --- 3.2 부분 일치 교수/과목/학교명 + 소스로 후보 행 인덱스 제한 ---
+    def _candidate_idx(self, professor, course, school, source=None):
         mask = pd.Series(True, index=self.df.index)
         for field, val in (("professor", professor), ("course", course), ("school", school)):
             if val:
                 mask &= self.df[field].astype(str).str.contains(re.escape(val), na=False)
+        if source and "source" in self.df.columns:
+            mask &= self.df["source"].astype(str) == source
         return self.df.index[mask].tolist()
 
-    def has_data(self, professor=None, course=None, school=None) -> bool:
-        if not (professor or course or school):
+    def has_data(self, professor=None, course=None, school=None, source=None) -> bool:
+        if not (professor or course or school or source):
             return True
-        return len(self._candidate_idx(professor, course, school)) > 0
+        return len(self._candidate_idx(professor, course, school, source)) > 0
 
     # --- 3.1 의미 검색 ---
-    def retrieve(self, query, professor=None, course=None, school=None, top_k=3) -> List[Review]:
-        if professor or course or school:
-            cand = self._candidate_idx(professor, course, school)
+    def retrieve(self, query, professor=None, course=None, school=None, source=None, top_k=3) -> List[Review]:
+        if professor or course or school or source:
+            cand = self._candidate_idx(professor, course, school, source)
             if not cand:
                 return []
         else:
@@ -96,7 +106,7 @@ class VectorRetriever:
             Review(
                 id=h["id"], school=h["school"], professor=h["professor"],
                 course=h["course"], rating=h["rating"], review=h["review"],
-                score=h["score"],
+                source=h.get("source", "review"), score=h["score"],
             )
             for h in hits
         ]
@@ -130,24 +140,34 @@ def _gemini_generate(prompt: str, api_key: str, model: str = "gemini-1.5-flash")
 def _offline_generate(query: str, contexts: List[Review]) -> str:
     if not contexts:
         return REFUSAL_MSG
-    by_prof: dict[str, List[Review]] = {}
-    for c in contexts:
-        by_prof.setdefault(c.professor, []).append(c)
 
-    lines = ["[강의평 근거 기반 요약]"]
-    summaries = []
-    for prof, revs in by_prof.items():
-        avg = sum(r.rating for r in revs) / len(revs)
-        courses = ", ".join(sorted({r.course for r in revs}))
-        cites = " ".join(r.citation() for r in revs)
-        lines.append(f"- {prof} 교수 (과목: {courses}): 평균 평점 {avg:.1f}/5 {cites}")
-        summaries.append((prof, avg))
-    if len(summaries) >= 2:
-        best = max(summaries, key=lambda s: s[1])
-        lines.append(f"\n[결론] 평점만 보면 '{best[0]}' 교수님 강의평이 가장 긍정적입니다 "
-                     f"(평균 {best[1]:.1f}/5). 구체 사유는 위 리뷰 근거를 확인하세요.")
-    else:
-        lines.append(f"\n[결론] '{summaries[0][0]}' 교수님 강의평 근거는 위와 같습니다.")
+    reviews = [c for c in contexts if c.source != "syllabus"]
+    syllabi = [c for c in contexts if c.source == "syllabus"]
+    lines = []
+
+    if reviews:
+        by_prof: dict[str, List[Review]] = {}
+        for c in reviews:
+            by_prof.setdefault(c.professor, []).append(c)
+        lines.append("[강의평 근거 기반 요약]")
+        summaries = []
+        for prof, revs in by_prof.items():
+            avg = sum(r.rating for r in revs) / len(revs)
+            courses = ", ".join(sorted({r.course for r in revs}))
+            cites = " ".join(r.citation() for r in revs)
+            lines.append(f"- {prof} 교수 (과목: {courses}): 평균 평점 {avg:.1f}/5 {cites}")
+            summaries.append((prof, avg))
+        if len(summaries) >= 2:
+            best = max(summaries, key=lambda s: s[1])
+            lines.append(f"[결론] 평점만 보면 '{best[0]}' 교수님 강의평이 가장 긍정적입니다 "
+                         f"(평균 {best[1]:.1f}/5).")
+
+    if syllabi:
+        lines.append("\n[강의계획서 참고 정보]")
+        for s in syllabi:
+            snippet = s.review[:120].strip()
+            lines.append(f"- {s.course} ({s.professor}): {snippet}... {s.citation()}")
+
     return "\n".join(lines)
 
 
@@ -156,12 +176,13 @@ class RagService:
         self.retriever = VectorRetriever()
         self.api_key = api_key if api_key is not None else os.environ.get("GEMINI_API_KEY")
 
-    def answer(self, query, professor=None, course=None, school=None, top_k=3) -> dict:
+    def answer(self, query, professor=None, course=None, school=None, source=None, top_k=3) -> dict:
         # 3.4 Zero-Hallucination
-        if (professor or course or school) and not self.retriever.has_data(professor, course, school):
+        if (professor or course or school or source) and \
+                not self.retriever.has_data(professor, course, school, source):
             return {"answer": REFUSAL_MSG, "grounded": False, "sources": []}
 
-        contexts = self.retriever.retrieve(query, professor, course, school, top_k)
+        contexts = self.retriever.retrieve(query, professor, course, school, source, top_k)
         if not contexts:
             return {"answer": REFUSAL_MSG, "grounded": False, "sources": []}
 
@@ -183,8 +204,8 @@ class RagService:
             "embedding_backend": self.retriever.meta["backend"],
             "sources": [
                 {
-                    "id": c.id, "school": c.school, "professor": c.professor,
-                    "course": c.course, "rating": c.rating,
+                    "id": c.id, "source": c.source, "school": c.school,
+                    "professor": c.professor, "course": c.course, "rating": c.rating,
                     "citation": c.citation(), "score": c.score,
                 }
                 for c in contexts
@@ -200,6 +221,8 @@ if __name__ == "__main__":
     p.add_argument("--professor", "-p", default=None)
     p.add_argument("--course", "-c", default=None)
     p.add_argument("--school", "-s", default=None)
+    p.add_argument("--source", default=None, choices=["review", "syllabus"],
+                   help="review 또는 syllabus 만 검색")
     p.add_argument("--top_k", "-k", type=int, default=3)
     args = p.parse_args()
 
@@ -210,7 +233,9 @@ if __name__ == "__main__":
             q = input("질문> ").strip()
             if q in ("나가기", "exit", "quit", ""):
                 break
-            print("\n" + svc.answer(q, args.professor, args.course, args.school, args.top_k)["answer"] + "\n")
+            print("\n" + svc.answer(q, args.professor, args.course, args.school,
+                                    args.source, args.top_k)["answer"] + "\n")
     else:
-        res = svc.answer(args.query, args.professor, args.course, args.school, args.top_k)
+        res = svc.answer(args.query, args.professor, args.course, args.school,
+                         args.source, args.top_k)
         print(json.dumps(res, ensure_ascii=False, indent=2))

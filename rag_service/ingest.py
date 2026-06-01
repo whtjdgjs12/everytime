@@ -23,23 +23,48 @@ from vectorstore import NumpyVectorStore
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(HERE, "reviews_real.csv")
+SYLLABI_PATH = os.path.join(HERE, "syllabi.csv")
 STORE_DIR = os.path.join(HERE, "store")
 LSA_PATH = os.path.join(STORE_DIR, "lsa_model.pkl")
 
+COLUMNS = ["id", "school", "professor", "course", "rating", "review", "source"]
+
 
 def doc_text(row) -> str:
-    """임베딩/검색 대상 문서: 과목·교수 맥락 + 리뷰 본문."""
+    """임베딩/검색 대상 문서. 리뷰는 평점 맥락 포함, 계획서는 본문 위주."""
+    if row["source"] == "syllabus":
+        return f"강의계획서 {row['course']} {row['professor']} {row['review']}"
     return f"{row['course']} {row['professor']} 평점{row['rating']} {row['review']}"
+
+
+def _load_unified() -> pd.DataFrame:
+    """리뷰 + (있으면) 강의계획서를 동일 스키마로 통합."""
+    frames = []
+    rv = pd.read_csv(CSV_PATH)
+    if "source" not in rv.columns:
+        rv["source"] = "review"
+    frames.append(rv[COLUMNS])
+    print(f"리뷰 {len(rv)}건 로드")
+
+    if os.path.exists(SYLLABI_PATH):
+        sy = pd.read_csv(SYLLABI_PATH)
+        frames.append(sy[COLUMNS])
+        print(f"강의계획서 청크 {len(sy)}건 로드")
+    else:
+        print("강의계획서 없음 (syllabi.csv) — 리뷰만 적재. 'python build_syllabi.py' 로 생성 가능")
+
+    df = pd.concat(frames, ignore_index=True)
+    df["id"] = df["id"].astype(str)
+    return df
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", default="auto", choices=["auto", "lsa", "gemini"])
-    parser.add_argument("--csv", default=CSV_PATH)
     args = parser.parse_args()
 
-    df = pd.read_csv(args.csv)
-    print(f"리뷰 {len(df)}건 로드")
+    df = _load_unified()
+    print(f"통합 문서 {len(df)}건 (리뷰+계획서)")
 
     docs = [doc_text(r) for _, r in df.iterrows()]
 

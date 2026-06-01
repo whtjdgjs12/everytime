@@ -77,12 +77,13 @@ class NumpyVectorStore:
             row_i = int(idx[o])
             row = self.rows.iloc[row_i]
             results.append({
-                "id": int(row["id"]),
+                "id": str(row["id"]),
                 "school": str(row["school"]),
                 "professor": str(row["professor"]),
                 "course": str(row["course"]),
                 "rating": int(row["rating"]),
                 "review": str(row["review"]),
+                "source": str(row["source"]) if "source" in self.rows.columns else "review",
                 "score": round(float(sims[o]), 4),
             })
         return results

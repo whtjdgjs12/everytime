@@ -26,24 +26,38 @@ store/  벡터 저장소 (vectors.npy + rows.csv + lsa_model.pkl)
 
 ## 실행 방법
 
-필요 패키지: `pandas`, `scikit-learn`, `numpy` (설치돼 있음)
+필요 패키지: `pandas`, `scikit-learn`, `numpy`, `pdfminer.six`(계획서용)
 
 ```bash
-# 1) 데이터 빌드 (원본 6개 CSV → 정제 통합)
+# 1) 강의평 데이터 빌드 (원본 6개 CSV → 정제 통합)
 python build_dataset.py
 
-# 2) 인덱싱 (임베딩 → 벡터DB 적재)  ※ store/ 생성
+# 1-2) 강의계획서 PDF 벡터화 (선택, ../temp_pdf/*.pdf → syllabi.csv)
+python build_syllabi.py
+
+# 2) 인덱싱 (리뷰+계획서 임베딩 → 벡터DB 적재)  ※ store/ 생성
 python ingest.py
 
-# 3) 테스트 (검색/필터/출처/환각방지 + 실제 교수 데모)
+# 3) 테스트 (검색/필터/출처/환각방지 + 계획서 + 실제 교수 데모)
 python test_vectordb.py
 
 # 4) 질의
 python rag_vectordb.py "컴퓨터프로그래밍 꿀강 추천" -c 컴퓨터프로그래밍
 python rag_vectordb.py "이 교수 수업 어때?" -p 윤승태
+python rag_vectordb.py "수업 목표랑 평가 비중" --source syllabus   # 계획서만 검색
 python rag_vectordb.py            # 대화형
 ```
-옵션: `-p 교수명`, `-c 과목명`, `-s 학교명`, `-k 개수`
+옵션: `-p 교수명`, `-c 과목명`, `-s 학교명`, `--source review|syllabus`, `-k 개수`
+
+### 강의계획서(PDF) 보강 — `build_syllabi.py`
+`../temp_pdf/*.pdf` 를 pdfminer.six 로 추출 → **동일 내용 중복 제거** → 450자 청킹 →
+리뷰와 같은 스키마(`source="syllabus"`, `rating=-1`)로 `syllabi.csv` 생성. `ingest.py` 가
+리뷰와 함께 한 벡터스토어에 적재하여, 한 질문이 리뷰·계획서를 함께 근거로 쓴다.
+출처는 `(학교 과목 강의계획서 참고)` 로 구분 표기된다.
+
+> ⚠️ 현재 `temp_pdf/` 의 81개 PDF 는 **모두 동일한 '가천인세미나' 계획서 1종**(나머지 80개는 중복)이라
+> 실질 보강 효과는 제한적이다. **서로 다른 실제 강의계획서 PDF 를 `temp_pdf/` 에 넣고 위 1-2)→2) 만
+> 다시 실행**하면 그대로 보강된다.
 
 > 팀원은 저장소를 clone 한 뒤 **1)→2)** 만 실행하면 `store/`(벡터DB)가 생성되어 바로 사용 가능합니다. (`store/`는 용량이 커서 git에 포함하지 않고 재생성합니다.)
 

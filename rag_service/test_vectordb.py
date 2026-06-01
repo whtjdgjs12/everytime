@@ -23,9 +23,27 @@ def check(name, cond, detail=""):
 def test_store_loaded():
     print("\n[저장소] 실제 데이터 적재 확인")
     r = VectorRetriever()
-    check("995건 적재", r.store.count() == 995, f"{r.store.count()}건")
+    df = r.store.rows
+    n_review = int((df["source"] == "review").sum()) if "source" in df.columns else r.store.count()
+    check("리뷰 995건 적재", n_review == 995, f"{n_review}건")
     check("임베딩 차원 일치", r.store.vectors.shape[1] == r.store.dim, str(r.store.vectors.shape))
     check("백엔드 표기", r.meta["backend"] in ("lsa", "gemini"), r.meta["backend"])
+
+
+def test_syllabus():
+    print("\n[강의계획서] PDF 벡터화 통합 확인")
+    r = VectorRetriever()
+    df = r.store.rows
+    if "source" not in df.columns or (df["source"] == "syllabus").sum() == 0:
+        check("강의계획서 적재(선택)", True, "syllabi.csv 없음 — 건너뜀")
+        return
+    n_syl = int((df["source"] == "syllabus").sum())
+    check("강의계획서 청크 적재", n_syl > 0, f"{n_syl}청크")
+
+    res = r.retrieve("강의계획서 평가 방법과 수업 목표", source="syllabus", top_k=3)
+    check("syllabus 소스 검색 동작", len(res) > 0)
+    check("결과가 모두 syllabus", all(x.source == "syllabus" for x in res))
+    check("계획서 출처 표기", res and "강의계획서 참고)" in res[0].citation(), res[0].citation() if res else "")
 
 
 def test_3_1_semantic():
@@ -92,6 +110,7 @@ def main():
     print("임베딩:", "Gemini" if os.environ.get("GEMINI_API_KEY") else "LSA(오프라인)")
     print("=" * 60)
     test_store_loaded()
+    test_syllabus()
     test_3_1_semantic()
     test_3_2_filter()
     test_3_3_citation()
